@@ -1,0 +1,100 @@
+---
+title: "SCISM_function_annotation_DIAMOND"
+author: "Anna Schrecengost"
+date: "May 3, 2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+###Annoation of contigs with DIAMOND
+
+####Setup
+
+First set up an environment with conda (remembering to load Anaconda as a module first), and install DIAMOND:
+
+```{r eval = FALSE, include = TRUE}
+conda create -n annotation
+conda install -c diamond 
+```
+
+####Database setup
+
+Now we need to download the database that we will align our sequences against and store it on Seawulf. First download desired database(s) in a compressed, .gz format. I downloaded directly from the Uniprot website:
+
+https://www.uniprot.org/uniprot/?query=reviewed:yes%20taxonomy:2
+https://www.uniprot.org/uniprot/?query=taxonomy%3A%222157%22+AND+reviewed%3Ayes&sort=score
+
+and then transferred to to Sewulf from my local comptuer:
+
+
+```{r eval = FALSE, include = TRUE}
+scp /C/Users/'User name'/Downloads/uniprot-reviews_yes+taxonomy_2157.fasta.gz username@seawulf.uri.edu:/home/shared/inbre-group1/SCiSM/metabolomics/SwissProtDB/uniprot-reviews_yes+taxonomy_2157.fasta.gz
+```
+
+Additional parameters need to be supplied to DIAMOND when making the database in order to provide taxonomy features. We need to download mapping files that map NCBI protein accession numbers to taxon IDSs (gzip compressed), and the NCBI taxonomy archive to extract the nodes.dmp file.
+
+```{r eval = FALSE, include = TRUE}
+wget ftp://ftp.ncbi.nih.gov/pub/taxonomy/accession2taxid/prot.accession2taxid.gz.md5
+wget ftp://ftp.ncbi.nih.gov/pub/taxonomy/accession2taxid/taxdmp.zip
+unzip -p taxdmb.zip nodes.dmp > nodes.dmp
+```
+
+Now create a Diamond database from the fasta.gz database. DIAMOND requires a binary formatted database that can be created with the makedb command, where --in specifies the database being used, --db the output directory, --taxonmap and --taxonnodes the taxonomic information from the NCBI database.
+
+
+```{r eval = FALSE, include = TRUE}
+diamond makedb --in uniprot-reviewed_yes+taxonomy_2157.fasta.gz --db SwissProtArchaea --taxonmap prot.accession2taxid.gz --taxonnodes nodes.dmp
+```
+
+This command should be saved as a script and run as a job with sbatch.
+
+
+####DIAMOND annotation
+
+We will use the blastx command, which aligns translated DNA query sequences (in this case, our assembled contigs) against the protein reference database that we just generated.
+
+First make sure that the contigs you want to run are in the current working directory by linking them from where they reside now:
+
+```{r eval = FALSE, include = TRUE}
+ln -s /home/shared/inbre-group1/SCiSM/assembly/IDBA/korr/assembly_results/korr_contig.fa
+```
+
+Now run blastx (remember to submit this as a job). The database file that we are aligning against is specified with -d, the query contig file we are aligning eith -q, and the output file name with -o. We can also establish a cut off e-value with the -e flag.
+
+Since we are working with contigs and not short reads, we want to use the sensitive mode parameter (--more-sensitive flag). We also want to use the frameshift parameter (-F 15 flag) which will trigger frame-shift aware alignments, and the --range-culling --top 10 flag, which will cause DIAMOND to report alignments along the whole length of the read, locally reporting alignments with 10% of the best local bit score (--top 10). 
+
+
+```{r eval = FALSE, include = TRUE}
+diamond blastx -p 2 -k 1 -e 0.00001 -d ../SwissProtArchaeadb/SwissProtArchaea.dmnd -q korr_contig.fa -o korr.uniprot.arch.annot.fa --more-sensitive -F 15 --range-culling --top 10 -f 6 qseqid sseqid qseq pident length mismatch gapopen qstart qend sstart send evalue bitscore xtaxids stitle
+```
+Also, here we specified the output format and fields that we will be given, using the -f flag. 6 is the standard BLAST tabular format, and we added the aligned query sequences (qseq), taxonomic IDs (staxids), information about the annotated protein sequence (sttile - we will use this to search for specific protein types later)
+
+####Subsetting annotation data
+
+Now we want to extract information from these annotation files. 
+
+#####Looking for hydrogenases
+
+We are specifically interested in hydrogenases, but this process could also be done to search for any specific protein type. In this system, the host has hydrogenases for generating hydrogen, and the symbiont for oxidizing hydrogen. These two types are very similar and difficult to distinguish between just by alignment, so we will upload any sequences that we think are hydrogenases to Hyddb (https://services.birc.au.dk/hyddb/). This is an accurate classifier for known hydrogenase sequences, utilizing a curated hydrogenase sequence database in order to provide functionally-predictive subgroup classifications. 
+
+We need a fasta file for upload to Hyddb. First generate files containing only a list of contig IDs and sequences in those contigs that aligned to hydrogenases. The -w flag ensures that only the whole word will come up in a match (we don't want to include dehydrogenases)
+
+```{r eval = FALSE, include = TRUE}
+grep -w "hydrogenase" korr.uniprot.arch.megahit.annot.fa | cut -f1,3 > korr.hydrogenase.sequences
+```
+Convert to fasta format in text editor, replacing the beginning of each line with >. Replace tabs with line breaks using: 
+```{r eval = FALSE, include = TRUE}
+sed 's/\t/\n/g' korr.hydrogenase.sequences > korr.hydrogenase.sequences.fasta
+```
+HydDB only accepts protein sequences, so we need to translate these DNA sequences into protein sequence using transeq command in the EMBOSS pacakge. 
+
+Install emboss and run the transeq command, 
+```{r eval = FALSE, include = TRUE}
+conda install -c emboss
+transeq -sequence korr.hydrogenase.fasta -outseq korr.hydrogenase.protein.pep -frame 6 -clean
+
+```
+Upload these fasta-formatted files to https://services.birc.au.dk/hyddb/, which will provide the specific hydrogenase subgroup classification for each query sequence, along with e-values. 
