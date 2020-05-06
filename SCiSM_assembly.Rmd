@@ -1,0 +1,423 @@
+---
+title: "SCiSM_assembly"
+author: "Jacob M. Green"
+date: "3/9/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+This protocol was developed by Jacob Green, Matias Gomez, and Anna Scherengost at the University of Rhode Island. Any questions should be directed to the Github forum for this SCiSM or to the emails provided in the project documentation
+
+The following commands are used to assemble 150 bp metagenome reads into contigs, creating metagenomes for the ciliates within the sameple and the symbionts associated with them.
+
+The script will contain instructions written in BASH on how to perform quality control of metagenome reads, assembly of metagenome reads, binning of metagenome reads, and analysis of assemblies
+
+Commands are presented in a way to be copied and used in your own server. 
+
+Familiarity with coding in BASH, python, and how to work within an commandline environment will be necessary to work through this process. Two excellent references are Practical Computing for Biologists by Haddock and Dunn and Bioinformatic Data Skills by Vince Buffalo
+
+**Let's get started**
+
+## Using an HPC (Seawulf)
+
+Here at URI we have two great computational resources available for research use. In order to work within High Performance Computing Cluster (HPCC) there are a few quirks. In working within this server we have learned a few tricks and want to provide a few tips.
+
+You must submit jobs for intensive functions. What does this mean? Your typical functions such as grep, gzip, bionconda functions, simple awk and sed commands do not need to be enetered into the job queue. But if you are running a trim, assembly, or analysis program you should create a job and submit it. What does this look like?
+
+Here is an example script. First you have to create the job in a server text editor. We worked with nano.
+```{r eval=FALSE, include=TRUE}
+nano template.sh
+```
+
+Next you have to provide a few lines within the script. The "#!/bin/bash" is the heading required for an .sh script. The "#SBATCH -t 1:00:00" is the time required for the program. The "#SBATCH --nodes=1 --ntasks-per-node=1" gives the job queue your node requirement information. The "<code here>" line is where you will put your function. For all the rest of the 
+```{r eval=FALSE, include=TRUE}
+#!/bin/bash
+#SBATCH -t 1:00:00
+#SBATCH --nodes=1 --ntasks-per-node=1
+<code here>
+```
+
+The "#!/bin/bash" is the heading required for an .sh script. The "#SBATCH -t 1:00:00" is the time required for the program. The "#SBATCH --nodes=1 --ntasks-per-node=1" gives the job queue your node requirement information. The "<code here>" line is where you will put your function/commands. For all the rest of the commands in this rmarkdown script you will put them in the "<code here>" line. Once you have properly edited your script save by "Ctrl+x" and then selecting "y".
+
+**You should make these scripts within the directories that you are working in!**
+
+To submit this script to the job queue you will need to enter
+```{r eval=FALSE, include=TRUE}
+sbatch template.sh
+```
+
+After entering you script you will now be given a slurm file which look like this 
+```{r eval=FALSE, include=TRUE}
+slurm-(a number).out
+```
+
+To view this and your program output use;
+```{r eval=FALSE, include=TRUE}
+cat slurm-(a number).out
+```
+
+## Using Bioconda (our metageomne assembly toolset)
+
+Bioconda is a channel for the conda package manager specializing in bioinformatics software. The conda package manager makes installing software a more streamlined process. 
+
+You should have full read,write, and execture functionality in this directory. If not utilize
+
+```{r eval=FALSE, include=TRUE}
+chmod 750 ~
+```
+
+Understand that this gives you immense power to run commands but also delete nearly anything in this directory and all sub directories. Use this power wisely.
+
+Install Miniconda and make it executable
+
+```{r eval=FALSE, include=TRUE}
+cd ~
+wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
+chmod 750 Miniconda3-latest-Linux-x86_64.sh
+```
+
+Run Miniconda3 configuration script and subsequent config commands
+
+```{r eval=FALSE, include=TRUE}
+./Miniconda3-latest-Linux-x86_64.sh
+conda config --add channels defaults
+conda config --add channels conda-forge
+conda config --add channels bioconda
+```
+
+Make sure that the bionconda has configured properly and can be accessed by viewing the configuration loadout. There should not be any readout errors. The next bit of code will also validate whether bioconda has been installed properly. 
+
+Next as an example we will create the environment "IDBA" and "busco"  that will upload all the necessary packages
+
+```{r eval=FALSE, include=TRUE}
+conda create -n IDBA idba
+```
+
+```{r eval=FALSE, include=TRUE}
+conda create -n busco busco=4.0.5
+```
+
+If you need different packages or wish to install other assemblers go to [Bioconda](https://anaconda.org/bioconda/) and search for the package you are looking to use
+
+To add new packages to the exisiting conda env
+
+```{r eval=FALSE, include=TRUE}
+conda install --name <environment name> <insert package here>
+```
+
+Checking the status of the conda environment
+
+```{r eval=FALSE, include=TRUE}
+conda info --envs
+```
+
+To utilize the environment you must activate the environment. The pipeline will indicate when to utilize this command.
+
+```{r eval=FALSE, include=TRUE}
+source activate <name of environment>
+```
+
+You should deactivate the environment after you are finished
+ 
+```{r eval=FALSE, include=TRUE}
+source deactivate <name of environment>
+```
+
+## QC and Trim reads
+
+Out of these four processes trimming and quality control (QC) is always needed. Normalizing may not be needed depending on how you are approaching your project. Spend some time thinking about how your data needs to be trimmed and and if your data set needs to normalized.
+
+### Quality Control
+
+**Using FastQC**
+
+You will utilize this program multiple times to make sure our reads are of good quality as we process them. FastQC is able to analyze our reads and sequences for common errors. For help analyzing data from this program please refer to [FastQC](https://www.bioinformatics.babraham.ac.uk/projects/fastqc). Continue to refer to this section when needed.
+
+Run quality control
+
+```{r eval = FALSE, include = TRUE}
+cd ~/eecseq_denovo/norm
+~/miniconda3/pkgs/fastqc-0.11.7-pl5.22.0_0/opt/fastqc-0.11.7/fastqc R1.fastq >> ../qc/R1_fastqc
+~/miniconda3/pkgs/fastqc-0.11.7-pl5.22.0_0/opt/fastqc-0.11.7/fastqc R1.fastq >> ../qc/R1_fastqc
+```
+
+Error here if reads do not pass certain FastQC steps. Use the Rstudio file system to view R1 and R2 fastqc files or you may view the files through and html system.
+
+We also recommend using the Multiqc to view all of the fastqc files together. 
+
+**Using multiqc**
+
+To analyze the data from the fastqc run we used [Multiqc](https://github.com/ewels/MultiQC). MultiQC is a tool to create a single report with interactive plots for multiple bioinformatics analyses across many samples.
+
+Its is as simple as running the program within a directory that contains your fastqc output
+
+```{r eval = FALSE, include = TRUE}
+multiqc .
+```
+
+### Trim
+
+**Using Trimmomatic** (optional and will differ between project depending on what you are sequencing)
+
+Following initial QC, FastQC may identify primers or other constructs within your read dataset. Here are some guidelines on how to use trimmomatic to help remove those artifacts. Be careful with this tool as removing certain sequence artifacts can alter you base sequences. Also, incomplete trimming can severely impact assembly of de novo reads. A sequenced text file is referenced when using this program to identify the artifacts it is trimming. Please refer to [Trimmomatic](http://www.usadellab.org/cms?page=trimmomatic) for text file structure and any other questions.
+
+Make the adapter file 
+
+```{r eval = FALSE, include = TRUE}
+nano adapterfile. fa
+```
+
+Insert the following text into the adapterfile.fa
+
+```{r eval = FALSE, include = TRUE}
+>TruSeq Universal Adapter
+AATGATACGGCGACCACCGAGATCTACACTCTTTCCCTACACGACGCTCTTCCGATCT
+>TruSeq Adapter, Index 1
+GATCGGAAGAGCACACGTCTGAACTCCAGTCACATCACGATCTCGTATGCCGTCTTCTGCTTG
+>TruSeq Adapter, Index 2
+GATCGGAAGAGCACACGTCTGAACTCCAGTCACCGATGTATCTCGTATGCCGTCTTCTGCTTG
+>TruSeq Adapter, Index 3
+GATCGGAAGAGCACACGTCTGAACTCCAGTCACTTAGGCATCTCGTATGCCGTCTTCTGCTTG
+>TruSeq Adapter, Index 4
+GATCGGAAGAGCACACGTCTGAACTCCAGTCACTGACCAATCTCGTATGCCGTCTTCTGCTTG
+>TruSeq Adapter, Index 5
+GATCGGAAGAGCACACGTCTGAACTCCAGTCACACAGTGATCTCGTATGCCGTCTTCTGCTTG
+>TruSeq Adapter, Index 6
+GATCGGAAGAGCACACGTCTGAACTCCAGTCACGCCAATATCTCGTATGCCGTCTTCTGCTTG
+>TruSeq Adapter, Index 7
+GATCGGAAGAGCACACGTCTGAACTCCAGTCACCAGATCATCTCGTATGCCGTCTTCTGCTTG
+>TruSeq Adapter, Index 8
+GATCGGAAGAGCACACGTCTGAACTCCAGTCACACTTGAATCTCGTATGCCGTCTTCTGCTTG
+>TruSeq Adapter, Index 9
+GATCGGAAGAGCACACGTCTGAACTCCAGTCACGATCAGATCTCGTATGCCGTCTTCTGCTTG
+>TruSeq Adapter, Index 10
+GATCGGAAGAGCACACGTCTGAACTCCAGTCACTAGCTTATCTCGTATGCCGTCTTCTGCTTG
+>TruSeq Adapter, Index 11
+GATCGGAAGAGCACACGTCTGAACTCCAGTCACGGCTACATCTCGTATGCCGTCTTCTGCTTG
+>TruSeq Adapter, Index 12
+GATCGGAAGAGCACACGTCTGAACTCCAGTCACCTTGTAATCTCGTATGCCGTCTTCTGCTTG
+>Illumina NlaIII Gex Adapter 1.01
+TCGGACTGTAGAACTCTGAAC
+>Illumina NlaIII Gex Adapter 1.02
+ACAGGTTCAGAGTTCTACAGTCCGACATG
+>Illumina NlaIII Gex Adapter 2.01
+CAAGCAGAAGACGGCATACGA
+>Illumina NlaIII Gex Adapter 2.02
+TCGTATGCCGTCTTCTGCTTG
+>Illumina NlaIII Gex PCR Primer 1
+CAAGCAGAAGACGGCATACGA
+>Illumina NlaIII Gex PCR Primer 2
+AATGATACGGCGACCACCGACAGGTTCAGAGTTCTACAGTCCGA
+>Illumina NlaIII Gex Sequencing Primer
+CCGACAGGTTCAGAGTTCTACAGTCCGACATG
+>Illumina Multiplexing Adapter 1
+GATCGGAAGAGCACACGTCT
+>Illumina Multiplexing Adapter 2
+ACACTCTTTCCCTACACGACGCTCTTCCGATCT
+>Illumina Multiplexing PCR Primer 1.01
+AATGATACGGCGACCACCGAGATCTACACTCTTTCCCTACACGACGCTCTTCCGATCT
+>Illumina Multiplexing PCR Primer 2.01
+GTGACTGGAGTTCAGACGTGTGCTCTTCCGATCT
+>Illumina Multiplexing Read1 Sequencing Primer
+ACACTCTTTCCCTACACGACGCTCTTCCGATCT
+>Illumina Multiplexing Index Sequencing Primer
+GATCGGAAGAGCACACGTCTGAACTCCAGTCAC
+>Illumina Multiplexing Read2 Sequencing Primer
+GTGACTGGAGTTCAGACGTGTGCTCTTCCGATCT
+>Illumina PCR Primer Index 1
+CAAGCAGAAGACGGCATACGAGATCGTGATGTGACTGGAGTTC
+>Illumina PCR Primer Index 2
+CAAGCAGAAGACGGCATACGAGATACATCGGTGACTGGAGTTC
+>Illumina PCR Primer Index 3
+CAAGCAGAAGACGGCATACGAGATGCCTAAGTGACTGGAGTTC
+>Illumina PCR Primer Index 4
+CAAGCAGAAGACGGCATACGAGATTGGTCAGTGACTGGAGTTC
+>Illumina PCR Primer Index 5
+CAAGCAGAAGACGGCATACGAGATCACTGTGTGACTGGAGTTC
+>Illumina PCR Primer Index 6
+CAAGCAGAAGACGGCATACGAGATATTGGCGTGACTGGAGTTC
+>Illumina PCR Primer Index 7
+CAAGCAGAAGACGGCATACGAGATGATCTGGTGACTGGAGTTC
+>Illumina PCR Primer Index 8
+CAAGCAGAAGACGGCATACGAGATTCAAGTGTGACTGGAGTTC
+>Illumina PCR Primer Index 9
+CAAGCAGAAGACGGCATACGAGATCTGATCGTGACTGGAGTTC
+>Illumina PCR Primer Index 10
+CAAGCAGAAGACGGCATACGAGATAAGCTAGTGACTGGAGTTC
+>Illumina PCR Primer Index 11
+CAAGCAGAAGACGGCATACGAGATGTAGCCGTGACTGGAGTTC
+>Illumina PCR Primer Index 12
+CAAGCAGAAGACGGCATACGAGATTACAAGGTGACTGGAGTTC
+>Illumina Paired End Adapter 1
+ACACTCTTTCCCTACACGACGCTCTTCCGATCT
+>Illumina Paired End Adapter 2
+CTCGGCATTCCTGCTGAACCGCTCTTCCGATCT
+>Illumina Paried End PCR Primer 1
+AATGATACGGCGACCACCGAGATCTACACTCTTTCCCTACACGACGCTCTTCCGATCT
+>Illumina Paired End PCR Primer 2
+CAAGCAGAAGACGGCATACGAGATCGGTCTCGGCATTCCTGCTGAACCGCTCTTCCGATCT
+>Illumina Paried End Sequencing Primer 1
+ACACTCTTTCCCTACACGACGCTCTTCCGATCT
+>Illumina Paired End Sequencing Primer 2
+CGGTCTCGGCATTCCTACTGAACCGCTCTTCCGATCT
+```
+
+
+```{r eval = FALSE, include = TRUE}
+usage:
+java -jar <direct path to trimmomatic> PE -phred33 <input.fq.gz><output.trim.fq.gz> ILLUMINACLIP:</opt/Trimmomatic-0.36/adapter/>TruSeq3-PE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+```
+
+```{r eval = FALSE, include = TRUE}
+example:
+java -jar /opt/Trimmomatic-0.36/trimmomatic-0.36.jar PE -phred33 R1.fastq.gz R2.fastq.gz R1_trimltpe.fastq.gz *R1_trimltupe.fastq.gz* R2_trimltpe.fastq.gz *R2_trimltupe.fastq.gz* ILLUMINACLIP:TruSeqLt.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36
+```
+
+* The u in the 5th and 7th argument, in italics, stand for unpaired
+
+link R1 and R2 files to trim folder
+
+## Assembly Party
+
+Assembly is a time and resource intensive process. There is a need to monitor these processes as they can be prone to failure due to system memory or thread constraints. Utilizing tmux or screen as a tool to run these programs in the background is necessary to effectively assemble reads. Please use "man screen" or "man tmux" if you are unfamiliar with how to run processes in the background.
+
+### IDBA
+
+[IDBA](https://github.com/loneknightpy/idba) is the basic iterative de Bruijn graph assembler for second-generation sequencing reads. IDBA-UD, an extension of IDBA, is designed to utilize paired-end reads to assemble low-depth regions and use progressive depth on contigs to reduce errors in high-depth regions. It is a generic purpose assembler and especially good for single-cell and metagenomic sequencing data. IDBA-Hybrid is another update version of IDBA-UD, which can make use of a similar reference genome to improve assembly result. IDBA-Tran is an iterative de Bruijn graph assembler for RNA-Seq data.There are are some preparation steps.
+
+First the read dataset needs to be decompressed:
+```{r eval = FALSE, include = TRUE}
+gunzip *.fastq.gz
+```
+
+Now we need to merge the forward and reverse reads and simultaneously convert the fastq file into fasta format using the “fq2fa” tool supplied with IDBA-UD:
+```{r eval = FALSE, include = TRUE}
+fq2fa –filter –merge paired_reads_forward.fastq paired_reads_reverse.fastq
+assembly.fa
+```
+
+Then we need to call the assembly program. I would recommend assigning 2 nodes and 4 tasks per node
+```{r eval = FALSE, include = TRUE}
+idba_ud -r assembly.fa -l -o assembly_results –mink 21 –maxk 101 –step 10 –num_threads 4
+```
+
+Your resulting contig file will be located in the assembly+results directory, named contig.fa.It may be prudant to rename this file with your organism or a unique identifier because we will be linking them to directories with other .fa file during binning and assessment.
+
+IDBA was not giving us the results we wanted and was causing issues with the run time of certain datasets so we transitioned to Megahit
+
+## Megahit
+
+```{r eval = FALSE, include = TRUE}
+megahit --k-min 21 --k-max 101 --k-step 10 --12 Korr_trim_assembly.fa -o korr_megahit_result
+```
+
+### N50
+
+N50 is the minimum contig length needed to cover 50% of the genome. Although it is not a perfect metric of assembly quality it is one of the fastest we can use and can act as a quick tool to leverage for assesment. Use (N50)[http://www.metagenomics.wiki/pdf/definition/assembly/n50] to find for information on what this metric is. We will be using the N50 output from the log files in the Megahit package.
+
+In megahit assembly directory
+```{r eval = FALSE, include = TRUE}
+cat log
+```
+
+You will find assembly statistics at the end of the log
+
+### BUSCO
+
+Benchmark Universal Single Copy Orthologs (**BUSCO**) is a strong method for assesing the proper assembly of certain genes. Othologous genes within these databases are derived from a single ancestral gene shared within the lineage and their single copy, duplicated, fragmented, and missing rates can be used to view the quality of your assembly. 
+
+The more specific database you can use the better. Within this frame work we will be using the Eukaryota and Metazoa databases. For any questions regarding BUSCO, its function, and accessing more databases please reference (BUSCO)[https://busco.ezlab.org/]
+
+**Using the Archaea database**
+
+```{r eval = FALSE, include = TRUE}
+busco -i korr.final.contigs.fa -l archaea_odb10 -o korr_busco_arch  -m genome -c 6
+```
+
+**Using the Bacteria database**
+
+```{r eval = FALSE, include = TRUE}
+busco -i korr.final.contigs.fa -l bacteria_odb10 -o korr_busco_bac  -m genome -c 6
+```
+
+**Using the Eukaryota database**
+
+```{r eval = FALSE, include = TRUE}
+busco -i korr.final.contigs.fa -l eukaryota_odb10 -o korr_busco_euk  -m genome -c 6
+```
+
+To make busco image you have to link all of the short_summary.txt files into the same folder then run the following code
+```{r eval = FALSE, include = TRUE}
+generate_plot.py -wd .
+```
+
+This data is located in /home/shared/inbre-group1/SCiSM/assembly/busco
+
+## Anvi'o
+
+We were unable to complete the pipeline for this program in the timeframe of our project. Here are some of the scripts ran for this section. These can be found in /home/shared/inbre-group1/SCiSM/alignment, which are subset by assembly.
+
+Reformat fasta header line so the Anvi'o program can work with the bam files
+```{r eval = FALSE, include = TRUE}
+anvi-script-reformat-fasta korr.final.contigs.fa -o korr.contigs.fixed.fa -l 0 --simplify-names
+```
+
+Build an index from the assembly fasta files
+```{r eval = FALSE, include = TRUE}
+bowtie2-build korr.final.contigs.fa korr.index.contigs 
+```
+
+Map the trimmed reads to the assembly using the index and output a sam file
+```{r eval = FALSE, include = TRUE}
+bowtie2 --threads 6 -x korr.index.contigs -1 /home/shared/inbre-group1/SCiSM/trim/Korr_all_R1_trimpe.fastq.gz -2 /home/shared/inbre-group1/SCiSM/trim/Korr_all_R2_trimpe.fastq.gz -S korr.sam
+```
+
+Convert sam file to a bam file to be used by Anvi'o
+```{r eval = FALSE, include = TRUE}
+samtools view -F 4 -bSq 30 korr.sam > korr.q30.bam
+```
+
+Intialize bam file to build another index
+```{r eval = FALSE, include = TRUE}
+anvi-init-bam korr.q30.bam -o korr.q30.anvi.bam
+```
+
+Create the contig database to store all of the subsequent analyses
+```{r eval = FALSE, include = TRUE}
+anvi-gen-contigs-database -f korr.final.contigs.fixed.fa -o korr.contigs.db -n "korr_contigs"
+```
+
+Run hmms on the contigs database
+```{r eval = FALSE, include = TRUE}
+anvi-run-hmms -c korr.contigs.db
+```
+
+Run cogs blast on contigs database
+```{r eval = FALSE, include = TRUE}
+anvi-run-ncbi-cogs -c korr.contigs.db --num-threads 6
+```
+
+Binning of a single genome
+```{r eval = FALSE, include = TRUE}
+anvi-cluster-contigs -p korr.q30.anvi.bam-ANVIO_PROFILE/PROFILE.db -c korr.contigs.db -C korr_cluster --driver concoct -T 6 --just-do-it
+```
+
+View some of the cluster statistics
+```{r eval = FALSE, include = TRUE}
+anvi-estimate-genome-completeness -c korr.contigs.db -p korr.q30.anvi.bam-ANVIO_PROFILE -C korr
+```
+
+Create an Anvi'o profile to be visualized
+```{r eval = FALSE, include = TRUE}
+anvi-profile -i korr.q30.anvi.bam -c korr.contigs.db --profile-SCVs --report-variability-full --cluster-contigs -T 6
+```
+
+
+
